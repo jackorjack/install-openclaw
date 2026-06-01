@@ -168,68 +168,69 @@ get_installed_openclaw_version() {
 setup_homebrew() {
     log_step "检查 Homebrew..."
 
-    if command_exists brew; then
+    # 确保 brew 在当前 shell 可用（刚装完还没 reload shell 的情况）
+    _ensure_brew_in_path() {
+        for brew_path in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+            if [ -f "$brew_path" ]; then
+                eval "$("$brew_path" shellenv)"
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    if command_exists brew || _ensure_brew_in_path; then
         log_info "Homebrew 已安装: $(brew --version | head -1)"
     else
         log_info "Homebrew 未安装，开始安装..."
-        # 使用国内镜像安装 Homebrew
+
+        # 国内网络用镜像加速
         if is_cn_network; then
-            log_info "检测到国内网络，使用 USTC 镜像安装 Homebrew..."
-            # 从国内镜像安装（USTC）
+            log_info "检测到国内网络，使用中科大镜像..."
             export HOMEBREW_BREW_GIT_REMOTE="$HOMEBREW_BREW_MIRROR"
             export HOMEBREW_CORE_GIT_REMOTE="$HOMEBREW_CORE_MIRROR"
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)" || {
-                # 如果 GitHub raw 无法访问，尝试使用国内镜像的安装脚本
-                log_warn "GitHub 下载失败，尝试使用 Gitee 镜像..."
+            export HOMEBREW_BOTTLE_DOMAIN="$HOMEBREW_BOTTLE_MIRROR"
+        fi
+
+        # 安装 Homebrew（非交互模式）
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || {
+            if is_cn_network; then
+                log_warn "官方脚本下载失败，尝试 Gitee 镜像..."
                 /bin/bash -c "$(curl -fsSL https://gitee.com/cunkai/HomebrewCN/raw/master/Homebrew.sh)"
-            }
-        else
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        fi
+            else
+                log_error "Homebrew 安装失败"
+                exit 1
+            fi
+        }
 
-        # 配置 shell 环境
-        if [ -f /opt/homebrew/bin/brew ]; then
-            eval "$(/opt/homebrew/bin/brew shellenv)"
-        elif [ -f /usr/local/bin/brew ]; then
-            eval "$(/usr/local/bin/brew shellenv)"
-        elif [ -f /home/linuxbrew/.linuxbrew/bin/brew ]; then
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-        fi
-
-        if command_exists brew; then
-            log_info "Homebrew 安装成功"
-        else
-            log_error "Homebrew 安装失败，请手动安装后重试"
+        _ensure_brew_in_path || {
+            log_error "Homebrew 安装后仍不可用，请检查终端输出"
             exit 1
-        fi
+        }
+        log_info "Homebrew 安装成功"
     fi
 
-    # 设置 Homebrew 国内源
+    # 国内网络：配置 Homebrew 镜像源 + 持久化环境变量
     if is_cn_network; then
         log_info "配置 Homebrew 国内镜像源（USTC）..."
-        # 替换 brew.git
-        cd "$(brew --repo)" 2>/dev/null && {
-            git remote set-url origin "$HOMEBREW_BREW_MIRROR" 2>/dev/null || true
-        }
-        # 替换 homebrew-core.git
-        cd "$(brew --repo homebrew/core)" 2>/dev/null && {
-            git remote set-url origin "$HOMEBREW_CORE_MIRROR" 2>/dev/null || true
-        }
-        # 设置 bottles 镜像
+
+        # git 仓库换源
+        cd "$(brew --repo)" 2>/dev/null && git remote set-url origin "$HOMEBREW_BREW_MIRROR" 2>/dev/null || true
+        cd "$(brew --repo homebrew/core)" 2>/dev/null && git remote set-url origin "$HOMEBREW_CORE_MIRROR" 2>/dev/null || true
+
+        # bottles 镜像：当前 session + 持久化到 shell 配置
         export HOMEBREW_BOTTLE_DOMAIN="$HOMEBREW_BOTTLE_MIRROR"
-        # 持久化到 shell 配置文件
         for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
             if [ -f "$rc" ]; then
-                grep -q "HOMEBREW_BOTTLE_DOMAIN" "$rc" 2>/dev/null || {
+                grep -q "HOMEBREW_BOTTLE_DOMAIN" "$rc" 2>/dev/null || \
                     echo "export HOMEBREW_BOTTLE_DOMAIN=${HOMEBREW_BOTTLE_MIRROR}" >> "$rc"
-                }
             fi
         done
-        log_info "Homebrew 国内源配置完成"
+        # brew API 下载也走国内镜像
+        export HOMEBREW_API_DOMAIN="$HOMEBREW_BOTTLE_MIRROR/api"
+        export HOMEBREW_PIP_INDEX_URL="https://mirrors.ustc.edu.cn/pypi/simple"
 
-        # 更新 Homebrew
-        log_info "更新 Homebrew..."
-        brew update --auto-update 2>/dev/null || true
+        log_info "Homebrew 国内源配置完成"
     fi
 }
 
@@ -242,35 +243,60 @@ install_nodejs_macos() {
     local node_major
     node_major=$(get_node_major_version)
 
+    # 当前版本已满足要求，直接返回
     if [ "$node_major" -ge "$NODE_MIN_MAJOR" ]; then
-        log_info "Node.js $(get_node_full_version) 已满足最低要求 (≥ v${NODE_MIN_MAJOR})"
+        log_info "Node.js $(get_node_full_version) 已满足要求 (≥ v${NODE_MIN_MAJOR})"
         return 0
     fi
 
-    log_info "安装 Node.js LTS（推荐 v${NODE_RECOMMENDED_MAJOR}）..."
-
+    # 确保 brew 可用
     if ! command_exists brew; then
         setup_homebrew
     fi
 
-    # 安装 Node.js（Homebrew 默认安装最新 LTS）
-    if [ "$node_major" -gt 0 ] && [ "$node_major" -lt "$NODE_MIN_MAJOR" ]; then
-        log_warn "当前 Node.js v${node_major} 不满足要求，将升级到最新 LTS"
-        brew upgrade node 2>/dev/null || brew install node
+    # 判断当前 node 是否来自 Homebrew
+    local node_from_brew=false
+    if [ "$node_major" -gt 0 ] && brew list node &>/dev/null; then
+        node_from_brew=true
+    fi
+
+    if [ "$node_from_brew" = true ]; then
+        log_warn "当前 Node.js v${node_major}（Homebrew 安装）不满足要求，升级中..."
+        brew upgrade node
     else
+        if [ "$node_major" -gt 0 ]; then
+            log_warn "当前 Node.js v${node_major} 不是通过 Homebrew 安装的"
+            log_info "将通过 Homebrew 安装新版本，安装后请确保 Homebrew 路径优先于旧版本"
+        fi
+        log_info "通过 Homebrew 安装 Node.js（最新稳定版）..."
         brew install node
+    fi
+
+    # 确保 brew 的 node 在 PATH 最前面
+    local brew_prefix
+    brew_prefix=$(brew --prefix 2>/dev/null || echo "")
+    if [ -n "$brew_prefix" ] && [ -d "$brew_prefix/bin" ]; then
+        export PATH="$brew_prefix/bin:$PATH"
     fi
 
     # 验证
     node_major=$(get_node_major_version)
     if [ "$node_major" -lt "$NODE_MIN_MAJOR" ]; then
         log_error "Node.js 安装后版本仍不满足要求 (v${node_major})"
-        log_error "请手动安装 Node.js ≥ v${NODE_MIN_MAJOR}"
+        log_error "系统中可能存在旧版 Node.js 覆盖了 Homebrew 的版本"
+        log_error "请手动排查: which node && node -v"
         exit 1
     fi
 
     log_info "Node.js $(get_node_full_version) 安装成功"
 }
+
+# 已知问题说明（非代码，仅注释记录）：
+# - 如果用户通过官网 .pkg 安装了旧版 Node.js（位于 /usr/local/bin），
+#   brew install node 会把新版装到 /usr/local/bin（Intel）或 /opt/homebrew/bin（M系列），
+#   如果旧版也在 /usr/local/bin，brew 新版会覆盖它（brew link --overwrite）。
+#   但如果旧版来自 nvm/n/fnm 等版本管理器，其 PATH 优先于 brew，
+#   脚本会检测到版本不满足并报错退出，用户需自行升级版本管理器中的 node。
 
 # -----------------------------------------------------------
 # Linux: 安装 Node.js
