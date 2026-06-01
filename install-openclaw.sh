@@ -240,20 +240,19 @@ setup_homebrew() {
 
 # 根据 macOS 版本返回系统可适配的最高 Node.js 主版本号
 # Node.js 各版本对 macOS 的最低要求：
-#   Node 26 → macOS 13+ (Ventura)
-#   Node 24 → macOS 12+ (Monterey)
-#   Node 22 → macOS 11+ (Big Sur)
+#   Node 26 → macOS 14+ (Sonoma) for arm64, 12+ for x64
+#   Node 24 → macOS 14+ (Sonoma) for arm64, 12+ for x64
+#   Node 22 → macOS 11+ (Big Sur) — 预编译包 arm64/x64 均支持较旧系统
+# 为安全起见按 Node 22 预编译包覆盖最广来适配
 get_max_node_for_macos() {
     local macos_major="$1"
 
     if [ "$macos_major" -lt 11 ]; then
         echo "0"   # 无可用版本
-    elif [ "$macos_major" -eq 11 ]; then
-        echo "22"  # Big Sur
-    elif [ "$macos_major" -eq 12 ]; then
-        echo "24"  # Monterey
+    elif [ "$macos_major" -le 12 ]; then
+        echo "22"  # Big Sur / Monterey: Node 24 预编译包对 arm64 要求 14+
     else
-        echo "$NODE_RECOMMENDED_MAJOR"  # 13+ 用最新 LTS
+        echo "$NODE_RECOMMENDED_MAJOR"  # 13+ (Ventura+) 用最新 LTS
     fi
 }
 
