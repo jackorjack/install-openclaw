@@ -10,11 +10,25 @@
 curl -fsSL https://raw.githubusercontent.com/jackorjack/install-openclaw/main/install-openclaw.sh | bash
 ```
 
-### Windows（PowerShell 管理员模式）
+### Windows CMD（命令提示符）
+
+下载 `install-openclaw.bat`，双击运行，或在 CMD 中执行：
+
+```cmd
+curl -fsSL https://raw.githubusercontent.com/jackorjack/install-openclaw/main/install-openclaw.bat -O && install-openclaw.bat
+```
+
+> 推荐右键 → **以管理员身份运行**。
+
+### Windows PowerShell
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iwr -useb https://raw.githubusercontent.com/jackorjack/install-openclaw/main/install-openclaw.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/jackorjack/install-openclaw/main/install-openclaw.ps1 -OutFile install-openclaw.ps1
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\install-openclaw.ps1
 ```
+
+> ⚠ 不要用 `iwr | iex` 管道方式，会导致脚本被误编码解析而输出乱码。必须先下载到文件再执行。
 
 > 如遇权限问题，右键 PowerShell → 以管理员身份运行。
 
@@ -49,6 +63,12 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iwr -useb https://ra
 # macOS / Linux
 curl -O https://raw.githubusercontent.com/jackorjack/install-openclaw/main/install-openclaw.sh
 bash install-openclaw.sh
+```
+
+```cmd
+:: Windows CMD（命令提示符）
+curl -O https://raw.githubusercontent.com/jackorjack/install-openclaw/main/install-openclaw.bat
+install-openclaw.bat
 ```
 
 ```powershell
@@ -143,11 +163,9 @@ sudo spctl --master-disable  # 临时允许非 App Store 应用
 ### Linux 非 root 用户无法 sudo？
 脚本优先通过 nvm 安装 Node.js（用户目录，无需 sudo）。仅在 nvm 不可用时才回退到系统包管理器。
 
-### Windows 脚本执行被阻止？
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-此命令仅对当前 PowerShell 窗口生效，不影响系统安全策略。
+### Windows PowerShell 中文乱码？
+不要使用 `iwr | iex` 管道方式。用 `iwr -OutFile` 先下载到文件，再 `.\install-openclaw.ps1` 执行。管道会丢失文件编码标记，导致 PowerShell 5.x 按系统 GBK 编码解析脚本。
+也可直接使用 CMD 批处理（`install-openclaw.bat`），双击运行。
 
 ### 安装后找不到 openclaw 命令？
 关闭并重新打开终端，使 PATH 环境变量生效。
