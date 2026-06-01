@@ -164,8 +164,16 @@ sudo spctl --master-disable  # 临时允许非 App Store 应用
 脚本优先通过 nvm 安装 Node.js（用户目录，无需 sudo）。仅在 nvm 不可用时才回退到系统包管理器。
 
 ### Windows PowerShell 中文乱码？
-不要使用 `iwr | iex` 管道方式。用 `iwr -OutFile` 先下载到文件，再 `.\install-openclaw.ps1` 执行。管道会丢失文件编码标记，导致 PowerShell 5.x 按系统 GBK 编码解析脚本。
-也可直接使用 CMD 批处理（`install-openclaw.bat`），双击运行。
+**请使用下载到文件再执行的方式**，不要用 `iwr | iex` 管道：
+```powershell
+# ✅ 正确：下载后执行（保留文件编码）
+iwr -useb https://.../install-openclaw.ps1 -OutFile install-openclaw.ps1
+.\install-openclaw.ps1
+
+# ❌ 错误：管道执行（丢失 BOM，中文乱码）
+iwr -useb https://.../install-openclaw.ps1 | iex
+```
+或直接使用 CMD 批处理 `install-openclaw.bat`（双击运行），自动下载并以正确编码执行。
 
 ### 安装后找不到 openclaw 命令？
 关闭并重新打开终端，使 PATH 环境变量生效。

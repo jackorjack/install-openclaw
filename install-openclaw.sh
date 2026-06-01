@@ -687,13 +687,46 @@ show_post_install_help() {
     echo -e "  ${BOLD}openclaw gateway status${NC}    查看网关状态"
     echo ""
 
-    # 如果使用了 nvm，提醒环境变量
-    if [ -s "$HOME/.nvm/nvm.sh" ] && ! grep -q "NVM_DIR" "$HOME/.bashrc" 2>/dev/null; then
-        echo -e "${YELLOW}⚠ 使用了 nvm 管理 Node.js，请确保以下内容在 shell 配置文件中:${NC}"
-        echo -e "  export NVM_DIR=\"\$HOME/.nvm\""
-        echo -e "  [ -s \"\$NVM_DIR/nvm.sh\" ] && \\. \"\$NVM_DIR/nvm.sh\""
+    # 环境变量刷新提示
+    local refreshed=false
+
+    # Homebrew 环境
+    if command_exists brew; then
+        local brew_prefix
+        brew_prefix=$(brew --prefix 2>/dev/null || echo "")
+        if [ -n "$brew_prefix" ] && [ -d "$brew_prefix/bin" ]; then
+            # 确保当前 session 的 PATH 包含 brew
+            if ! echo "$PATH" | grep -q "$brew_prefix/bin"; then
+                export PATH="$brew_prefix/bin:$PATH"
+                refreshed=true
+            fi
+        fi
+    fi
+
+    # nvm 环境
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null
+        refreshed=true
+    fi
+
+    # 确定 shell 配置文件
+    local shell_rc=""
+    case "$(basename "$SHELL" 2>/dev/null)" in
+        zsh)  shell_rc="$HOME/.zshrc" ;;
+        bash) shell_rc="$HOME/.bashrc" ;;
+        *)    shell_rc="$HOME/.profile" ;;
+    esac
+
+    if [ "$refreshed" = true ]; then
+        echo -e "${YELLOW}⚠ 当前终端已刷新环境变量${NC}"
+        echo -e "${YELLOW}⚠ 打开新终端后如找不到 openclaw，请执行:${NC}"
+        echo -e "  ${BOLD}source ${shell_rc}${NC}"
         echo ""
     fi
+
+    echo -e "${CYAN}也可直接关闭并重新打开终端，环境变量即生效。${NC}"
+    echo ""
 }
 
 # -----------------------------------------------------------
