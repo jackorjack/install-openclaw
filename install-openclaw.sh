@@ -704,22 +704,10 @@ show_post_install_help() {
         refreshed=true
     fi
 
-    # 确定 shell 配置文件
-    local shell_rc=""
-    case "$(basename "$SHELL" 2>/dev/null)" in
-        zsh)  shell_rc="$HOME/.zshrc" ;;
-        bash) shell_rc="$HOME/.bashrc" ;;
-        *)    shell_rc="$HOME/.profile" ;;
-    esac
-
     if [ "$refreshed" = true ]; then
-        echo -e "${YELLOW}⚠ 当前终端已刷新环境变量${NC}"
-        echo -e "${YELLOW}⚠ 打开新终端后如找不到 openclaw，请执行:${NC}"
-        echo -e "  ${BOLD}source ${shell_rc}${NC}"
-        echo ""
+        echo -e "${YELLOW}⚠ 当前终端环境变量已刷新，可直接使用 openclaw 命令${NC}"
     fi
-
-    echo -e "${CYAN}也可直接关闭并重新打开终端，环境变量即生效。${NC}"
+    echo -e "${CYAN}新终端中如找不到命令，请关闭并重新打开终端即可${NC}"
     echo ""
 }
 
