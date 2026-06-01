@@ -235,44 +235,111 @@ setup_homebrew() {
 }
 
 # -----------------------------------------------------------
-# macOS: 通过 Homebrew 安装 Node.js
+# macOS: Node.js 版本适配 & 安装
 # -----------------------------------------------------------
+
+# 根据 macOS 版本返回系统可适配的最高 Node.js 主版本号
+# Node.js 各版本对 macOS 的最低要求：
+#   Node 26 → macOS 13+ (Ventura)
+#   Node 24 → macOS 12+ (Monterey)
+#   Node 22 → macOS 11+ (Big Sur)
+get_max_node_for_macos() {
+    local macos_major="$1"
+
+    if [ "$macos_major" -lt 11 ]; then
+        echo "0"   # 无可用版本
+    elif [ "$macos_major" -eq 11 ]; then
+        echo "22"  # Big Sur
+    elif [ "$macos_major" -eq 12 ]; then
+        echo "24"  # Monterey
+    else
+        echo "$NODE_RECOMMENDED_MAJOR"  # 13+ 用最新 LTS
+    fi
+}
+
 install_nodejs_macos() {
     log_step "安装 Node.js (macOS)..."
 
-    local node_major
+    local node_major macos_major max_available
     node_major=$(get_node_major_version)
+    macos_major=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)
+    max_available=$(get_max_node_for_macos "$macos_major")
 
-    # 当前版本已满足要求，直接返回
+    # 当前版本已满足
     if [ "$node_major" -ge "$NODE_MIN_MAJOR" ]; then
         log_info "Node.js $(get_node_full_version) 已满足要求 (≥ v${NODE_MIN_MAJOR})"
         return 0
     fi
 
-    # 确保 brew 可用
+    # 系统太旧，Node.js ≥ 22 均不支持
+    if [ "$max_available" -eq 0 ]; then
+        log_error "macOS ${macos_major}.x 版本过旧"
+        log_error "Node.js ≥ v${NODE_MIN_MAJOR} 最低要求 macOS 11 (Big Sur)"
+        log_error "当前系统无法安装 OpenClaw，请升级 macOS"
+        exit 1
+    fi
+
+    log_info "macOS ${macos_major}.x → 可适配最高 Node.js v${max_available}"
+
+    # macOS 11 (Big Sur): Homebrew 已停止官方支持，走 nvm
+    if [ "$macos_major" -eq 11 ]; then
+        log_info "Big Sur 使用 nvm 安装 Node.js v${max_available}..."
+        install_nodejs_via_nvm "$max_available"
+        return $?
+    fi
+
+    # macOS 12+: 通过 Homebrew 安装
+    _install_nodejs_macos_brew "$max_available"
+}
+
+# 通过 Homebrew 安装适配的 Node.js 版本
+_install_nodejs_macos_brew() {
+    local target_major="$1"
+    local node_from_brew=false
+
     if ! command_exists brew; then
         setup_homebrew
     fi
 
     # 判断当前 node 是否来自 Homebrew
-    local node_from_brew=false
-    if [ "$node_major" -gt 0 ] && brew list node &>/dev/null; then
-        node_from_brew=true
+    if [ "$node_major" -gt 0 ] 2>/dev/null; then
+        brew list node &>/dev/null && node_from_brew=true
     fi
+    # 重新获取（可能 brew 刚装完）
+    local node_major
+    node_major=$(get_node_major_version)
 
-    if [ "$node_from_brew" = true ]; then
-        log_warn "当前 Node.js v${node_major}（Homebrew 安装）不满足要求，升级中..."
-        brew upgrade node
-    else
-        if [ "$node_major" -gt 0 ]; then
-            log_warn "当前 Node.js v${node_major} 不是通过 Homebrew 安装的"
-            log_info "将通过 Homebrew 安装新版本，安装后请确保 Homebrew 路径优先于旧版本"
+    # 老系统装特定版本 formula，新系统装最新
+    if [ "$target_major" -lt "$NODE_RECOMMENDED_MAJOR" ]; then
+        local formula="node@${target_major}"
+        log_info "安装 Homebrew formula: ${formula}（当前系统最高适配版本）"
+
+        if [ "$node_from_brew" = true ]; then
+            brew upgrade "$formula" 2>/dev/null || brew install "$formula"
+        else
+            if [ "$node_major" -gt 0 ]; then
+                log_warn "当前 Node.js v${node_major} 非 Homebrew 安装，将通过 brew 安装新版本"
+            fi
+            brew install "$formula"
         fi
+
+        # 版本化 formula 是 keg-only，需手动 link 才会出现在 PATH
+        brew link --force --overwrite "$formula" 2>/dev/null || true
+    else
         log_info "通过 Homebrew 安装 Node.js（最新稳定版）..."
-        brew install node
+
+        if [ "$node_from_brew" = true ]; then
+            log_warn "当前 Node.js v${node_major}（brew）不满足要求，升级中..."
+            brew upgrade node
+        else
+            if [ "$node_major" -gt 0 ]; then
+                log_warn "当前 Node.js v${node_major} 非 Homebrew 安装，将通过 brew 安装新版本"
+            fi
+            brew install node
+        fi
     fi
 
-    # 确保 brew 的 node 在 PATH 最前面
+    # 确保 brew 的 bin 目录在 PATH 最前面（覆盖 nvm/pkg 等旧版本）
     local brew_prefix
     brew_prefix=$(brew --prefix 2>/dev/null || echo "")
     if [ -n "$brew_prefix" ] && [ -d "$brew_prefix/bin" ]; then
@@ -290,13 +357,6 @@ install_nodejs_macos() {
 
     log_info "Node.js $(get_node_full_version) 安装成功"
 }
-
-# 已知问题说明（非代码，仅注释记录）：
-# - 如果用户通过官网 .pkg 安装了旧版 Node.js（位于 /usr/local/bin），
-#   brew install node 会把新版装到 /usr/local/bin（Intel）或 /opt/homebrew/bin（M系列），
-#   如果旧版也在 /usr/local/bin，brew 新版会覆盖它（brew link --overwrite）。
-#   但如果旧版来自 nvm/n/fnm 等版本管理器，其 PATH 优先于 brew，
-#   脚本会检测到版本不满足并报错退出，用户需自行升级版本管理器中的 node。
 
 # -----------------------------------------------------------
 # Linux: 安装 Node.js
@@ -355,8 +415,10 @@ install_nodejs_linux() {
 }
 
 # 通过 nvm 安装 Node.js
+# 参数: $1 - 目标主版本号（可选，默认 $NODE_RECOMMENDED_MAJOR）
 install_nodejs_via_nvm() {
-    log_info "尝试使用 nvm 安装 Node.js..."
+    local target_version="${1:-$NODE_RECOMMENDED_MAJOR}"
+    log_info "尝试使用 nvm 安装 Node.js v${target_version}..."
 
     # 如果 nvm 已安装
     if [ -s "$HOME/.nvm/nvm.sh" ]; then
@@ -396,14 +458,14 @@ install_nodejs_via_nvm() {
         log_info "设置 Node.js 下载镜像: $NODE_MIRROR"
     fi
 
-    # 安装 Node.js LTS
-    log_info "通过 nvm 安装 Node.js v${NODE_RECOMMENDED_MAJOR} LTS..."
-    nvm install "$NODE_RECOMMENDED_MAJOR" 2>/dev/null || {
-        log_warn "nvm install ${NODE_RECOMMENDED_MAJOR} 失败"
+    # 安装目标版本的 Node.js
+    log_info "nvm install ${target_version}..."
+    nvm install "$target_version" 2>/dev/null || {
+        log_warn "nvm install ${target_version} 失败，可能当前系统不支持该版本"
         return 1
     }
-    nvm use "$NODE_RECOMMENDED_MAJOR" 2>/dev/null || true
-    nvm alias default "$NODE_RECOMMENDED_MAJOR" 2>/dev/null || true
+    nvm use "$target_version" 2>/dev/null || true
+    nvm alias default "$target_version" 2>/dev/null || true
 
     # 确保 node/npm 在当前 shell 中可用
     export PATH="$NVM_DIR/versions/node/$(nvm version)/bin:$PATH"
