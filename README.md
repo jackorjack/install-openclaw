@@ -136,6 +136,32 @@ openclaw gateway status
 
 ---
 
+## 卸载
+
+### macOS / Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jackorjack/install-openclaw/main/uninstall-openclaw.sh | bash
+```
+
+### Windows CMD
+
+```cmd
+curl -fsSL https://raw.githubusercontent.com/jackorjack/install-openclaw/main/uninstall-openclaw.bat -O && uninstall-openclaw.bat
+```
+
+### Windows PowerShell
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/jackorjack/install-openclaw/main/uninstall-openclaw.ps1 -OutFile uninstall-openclaw.ps1
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\uninstall-openclaw.ps1
+```
+
+卸载脚本会依次：停止服务 → npm 卸载 openclaw → 询问是否清理 ~/.openclaw 等数据目录。
+
+---
+
 ## 系统要求
 
 | 项目 | 最低要求 |
