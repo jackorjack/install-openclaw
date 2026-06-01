@@ -453,10 +453,6 @@ setup_npm_mirror() {
     if is_cn_network; then
         log_info "配置 npm registry: $NPM_MIRROR"
         npm config set registry "$NPM_MIRROR"
-
-        # 同时配置 Node.js 二进制下载镜像
-        npm config set disturl "${NODE_MIRROR}/"
-
         log_info "npm 镜像源配置完成"
     else
         # 海外环境，确保使用官方源

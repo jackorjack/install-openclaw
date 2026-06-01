@@ -201,7 +201,6 @@ function Set-NpmMirror {
     if (Test-CNNetwork) {
         Write-Info "配置 npm registry: $NPM_MIRROR"
         npm config set registry "$NPM_MIRROR"
-        npm config set disturl "$NODE_MIRROR/"
         Write-Info "npm 镜像源配置完成"
     } else {
         $currentRegistry = npm config get registry 2>$null
