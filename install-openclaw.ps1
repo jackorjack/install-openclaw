@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     OpenClaw 跨平台自动安装/更新脚本 (Windows PowerShell)
 .DESCRIPTION
@@ -10,6 +10,13 @@
 #>
 
 #Requires -Version 5.1
+
+# ---- 编码修复（PowerShell 5.x 中文 Windows 不乱码） ----
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    $null = & chcp 65001 2>$null
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+}
 
 # ---- 配置 ----
 $NPM_MIRROR = "https://registry.npmmirror.com"
