@@ -619,13 +619,8 @@ install_or_update_openclaw() {
     log_info "正在安装 openclaw@${latest_version}..."
     echo ""
 
-    # 使用 npm 全局安装，用临时文件捕获退出码（兼容不同 shell 的 PIPESTATUS 行为）
-    local tmp_out
-    tmp_out=$(mktemp) || tmp_out="/tmp/openclaw-install-$$.log"
-    npm install -g "openclaw@${latest_version}" > "$tmp_out" 2>&1
+    npm install -g "openclaw@${latest_version}" --no-fund 2>&1
     local install_status=$?
-    cat "$tmp_out"
-    rm -f "$tmp_out"
 
     if [ "$install_status" -ne 0 ]; then
         log_error "OpenClaw 安装失败（退出码: $install_status）"
