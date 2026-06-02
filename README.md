@@ -121,8 +121,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ## 安装后
 
 ```bash
-# 首次初始化（配置模型和通道，安装后台守护进程）
-openclaw onboard --install-daemon
+# 首次初始化（配置模型和通道）
+openclaw onboard
 
 # 查看版本
 openclaw --version

@@ -312,7 +312,7 @@ function Show-PostInstallHelp {
     Write-Title "安装完成！"
 
     Write-Host "运行以下命令初始化 OpenClaw:"
-    Write-Host "  openclaw onboard --install-daemon" -ForegroundColor Yellow
+    Write-Host "  openclaw onboard" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "其他常用命令:"
     Write-Host "  openclaw --version         查看版本"

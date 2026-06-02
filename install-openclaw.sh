@@ -673,7 +673,7 @@ show_post_install_help() {
     log_title "安装完成！"
 
     echo -e "运行以下命令初始化 OpenClaw:"
-    echo -e "  ${BOLD}openclaw onboard --install-daemon${NC}"
+    echo -e "  ${BOLD}openclaw onboard${NC}"
     echo ""
     echo -e "其他常用命令:"
     echo -e "  ${BOLD}openclaw --version${NC}         查看版本"

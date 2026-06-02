@@ -43,5 +43,5 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [INFO] 安装完成。运行 'openclaw onboard --install-daemon' 初始化配置
+echo [INFO] 安装完成。运行 'openclaw onboard' 初始化配置
 pause
