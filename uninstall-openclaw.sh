@@ -16,6 +16,7 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_step()  { echo -e "\n${BOLD}--- $1 ---${NC}"; }
 
 command_exists() { command -v "$1" &>/dev/null; }
 
@@ -30,89 +31,158 @@ get_installed_version() {
     fi
 }
 
-# 获取 npm 全局安装路径
 get_npm_global_path() {
     npm root -g 2>/dev/null || echo ""
 }
 
 # -----------------------------------------------------------
-# 停止服务
+# 第一步：停止所有 OpenClaw 进程（先于 npm 卸载执行）
 # -----------------------------------------------------------
-stop_services() {
-    log_info "正在停止 OpenClaw 相关服务..."
+kill_all_processes() {
+    log_step "停止 OpenClaw 进程"
 
-    # 停止 gateway 守护进程
+    local killed=0
+
+    # 1) 通过 CLI 停止 gateway（此时 openclaw 命令还在）
     if command_exists openclaw; then
+        log_info "调用 openclaw gateway stop ..."
         openclaw gateway stop 2>/dev/null || true
+        sleep 1
     fi
 
-    # 清理可能的 launchd/systemd 服务
-    if [ -f "$HOME/Library/LaunchAgents/com.openclaw.gateway.plist" ]; then
-        launchctl unload "$HOME/Library/LaunchAgents/com.openclaw.gateway.plist" 2>/dev/null || true
-        rm -f "$HOME/Library/LaunchAgents/com.openclaw.gateway.plist"
-        log_info "已移除 macOS LaunchAgent"
-    fi
+    # 2) pkill 所有相关进程
+    local patterns=("openclaw" "clawdbot" "moltbot")
+    for pat in "${patterns[@]}"; do
+        if pgrep -f "$pat" &>/dev/null; then
+            log_info "终止进程: $pat"
+            pkill -f "$pat" 2>/dev/null || true
+            killed=1
+        fi
+    done
 
-    if [ -f "$HOME/.config/systemd/user/openclaw-gateway.service" ]; then
-        systemctl --user stop openclaw-gateway 2>/dev/null || true
-        systemctl --user disable openclaw-gateway 2>/dev/null || true
-        rm -f "$HOME/.config/systemd/user/openclaw-gateway.service"
-        log_info "已移除 systemd 用户服务"
-    fi
+    # 等待进程退出
+    sleep 1
 
-    log_info "服务已停止"
+    # 3) 强制杀掉残留（用之前用过的名称）
+    for pat in "${patterns[@]}"; do
+        if pgrep -f "$pat" &>/dev/null; then
+            log_warn "进程残留，强制终止: $pat"
+            pkill -9 -f "$pat" 2>/dev/null || true
+        fi
+    done
+
+    if [ "$killed" -eq 0 ]; then
+        log_info "没有运行中的 OpenClaw 进程"
+    fi
 }
 
 # -----------------------------------------------------------
-# npm 卸载
+# 第二步：卸载系统服务（launchd / systemd）
+# -----------------------------------------------------------
+remove_system_services() {
+    log_step "移除系统服务"
+
+    # --- macOS LaunchAgent ---
+    # openclaw 的 LaunchAgent 可能叫不同名字，搜索所有可能的 plist
+    if [ -d "$HOME/Library/LaunchAgents" ]; then
+        local plists
+        plists=$(find "$HOME/Library/LaunchAgents" -maxdepth 1 -name '*openclaw*' -o -name '*clawdbot*' -o -name '*moltbot*' 2>/dev/null)
+        if [ -n "$plists" ]; then
+            while IFS= read -r plist; do
+                log_info "卸载 LaunchAgent: $(basename "$plist")"
+                launchctl bootout "gui/$(id -u)" "$plist" 2>/dev/null || \
+                    launchctl unload "$plist" 2>/dev/null || true
+                rm -f "$plist"
+                log_info "已删除: $plist"
+            done <<< "$plists"
+        else
+            log_info "未找到 openclaw 相关的 LaunchAgent"
+        fi
+    fi
+
+    # 也检查 /Library/LaunchDaemons（系统级）
+    for dir in "/Library/LaunchDaemons" "/Library/LaunchAgents"; do
+        if [ -d "$dir" ]; then
+            local sys_plists
+            sys_plists=$(find "$dir" -maxdepth 1 -name '*openclaw*' -o -name '*clawdbot*' 2>/dev/null)
+            if [ -n "$sys_plists" ]; then
+                while IFS= read -r plist; do
+                    log_warn "发现系统级服务: $plist"
+                    sudo launchctl bootout system "$plist" 2>/dev/null || \
+                        sudo launchctl unload "$plist" 2>/dev/null || true
+                    sudo rm -f "$plist"
+                done <<< "$sys_plists"
+            fi
+        fi
+    done
+
+    # --- Linux systemd ---
+    if command_exists systemctl; then
+        for name in openclaw-gateway openclaw clawdbot moltbot; do
+            if systemctl --user is-enabled "$name" &>/dev/null 2>&1; then
+                systemctl --user stop "$name" 2>/dev/null || true
+                systemctl --user disable "$name" 2>/dev/null || true
+                log_info "已停止 systemd 用户服务: $name"
+            fi
+            rm -f "$HOME/.config/systemd/user/${name}.service" 2>/dev/null
+        done
+    fi
+}
+
+# -----------------------------------------------------------
+# 第三步：npm 卸载
 # -----------------------------------------------------------
 uninstall_npm_package() {
+    log_step "npm 卸载"
+
     local version
     version=$(get_installed_version)
 
     if [ -z "$version" ]; then
-        log_info "未检测到 openclaw（npm 全局），跳过"
+        log_info "openclaw 未通过 npm 安装，跳过"
         return 0
     fi
 
     log_info "检测到 openclaw v${version}，正在卸载..."
     npm uninstall -g openclaw 2>&1 || {
-        log_warn "npm 卸载失败，尝试强制清理..."
-        # 手动删除 npm 全局目录中的 openclaw
+        log_warn "npm 卸载失败，手动清理残留..."
         local npm_global
         npm_global=$(get_npm_global_path)
         if [ -n "$npm_global" ] && [ -d "$npm_global/openclaw" ]; then
             rm -rf "$npm_global/openclaw"
-            log_info "已手动删除 $npm_global/openclaw"
+            log_info "已删除 $npm_global/openclaw"
         fi
-        # 删除 bin 链接
         local npm_bin
         npm_bin=$(npm bin -g 2>/dev/null || echo "")
         if [ -n "$npm_bin" ]; then
-            rm -f "$npm_bin/openclaw" 2>/dev/null || true
+            rm -f "$npm_bin/openclaw" "$npm_bin/clawdbot" "$npm_bin/moltbot" 2>/dev/null || true
         fi
     }
 
     # 验证
+    hash -r 2>/dev/null || true  # 刷新 bash 命令缓存
     if command_exists openclaw; then
-        log_warn "卸载后 openclaw 命令仍存在，可能来自其他安装方式"
-        log_warn "请手动检查: which openclaw"
+        log_warn "卸载后 openclaw 命令仍存在: $(which openclaw 2>/dev/null)"
+        log_warn "请手动删除该文件"
     else
         log_info "openclaw 已从 npm 全局卸载"
     fi
 }
 
 # -----------------------------------------------------------
-# 清理数据和配置
+# 第四步：清理数据和配置
 # -----------------------------------------------------------
 cleanup_data() {
+    log_step "清理数据"
+
     echo ""
-    echo -e "${YELLOW}是否清理 OpenClaw 数据和配置？${NC}"
-    echo "这将删除以下目录（如存在）："
-    echo "  ~/.openclaw/"
-    echo "  ~/.config/openclaw/"
+    echo -e "  以下目录将被删除（如存在）："
+    echo -e "    ~/.openclaw/"
+    echo -e "    ~/.config/openclaw/"
+    echo -e "    ~/.clawdbot/"
+    echo -e "    ~/.moltbot/"
     echo ""
-    read -r -p "确认删除? [y/N] " yn
+    read -r -p "  确认删除? [y/N] " yn
 
     if [[ ! "$yn" =~ ^[Yy]$ ]]; then
         log_info "已跳过数据清理"
@@ -120,26 +190,16 @@ cleanup_data() {
     fi
 
     local cleaned=0
+    for dir in "$HOME/.openclaw" "$HOME/.config/openclaw" "$HOME/.clawdbot" "$HOME/.moltbot"; do
+        if [ -d "$dir" ]; then
+            rm -rf "$dir"
+            log_info "已删除 $dir"
+            cleaned=1
+        fi
+    done
 
-    if [ -d "$HOME/.openclaw" ]; then
-        rm -rf "$HOME/.openclaw"
-        log_info "已删除 ~/.openclaw/"
-        cleaned=1
-    fi
-
-    if [ -d "$HOME/.config/openclaw" ]; then
-        rm -rf "$HOME/.config/openclaw"
-        log_info "已删除 ~/.config/openclaw/"
-        cleaned=1
-    fi
-
-    # 清理 npm 缓存中的 openclaw
-    local npm_cache
-    npm_cache=$(npm cache ls 2>/dev/null | grep -c openclaw 2>/dev/null || echo "0")
-    if [ "$npm_cache" -gt 0 ] 2>/dev/null; then
-        npm cache clean --force 2>/dev/null || true
-        log_info "已清理 npm 缓存"
-    fi
+    # npm 缓存
+    npm cache clean --force 2>/dev/null || true
 
     if [ "$cleaned" -eq 0 ]; then
         log_info "没有需要清理的数据目录"
@@ -158,21 +218,17 @@ main() {
 
     local version
     version=$(get_installed_version)
-
     if [ -n "$version" ]; then
         echo -e "  已安装版本: ${BOLD}v${version}${NC}"
     else
-        echo -e "  状态: ${YELLOW}未检测到 openclaw${NC}"
+        echo -e "  状态: ${YELLOW}openclaw 命令未找到${NC}（可能已卸载，继续清理残留）"
     fi
     echo ""
 
-    # 1. 停止服务
-    stop_services
-
-    # 2. npm 卸载
+    # 执行顺序很关键：先停服务/杀进程，再卸载包，最后清数据
+    kill_all_processes
+    remove_system_services
     uninstall_npm_package
-
-    # 3. 清理数据
     cleanup_data
 
     echo ""
